@@ -1,61 +1,79 @@
 # Detection as Code — Splunk
 
-Repositório para gerenciar detecções Splunk como código com CI/CD automatizado via GitHub Actions.
+Manage Splunk detections as versioned YAML files with a full CI/CD pipeline powered by GitHub Actions and a self-hosted runner running in Orbstack.
 
-## Como funciona
+## How it works
 
 ```
-Analista cria/edita detection YAML
-        ↓
-  git push → abre PR
-        ↓
-GitHub Actions (self-hosted runner)
-  ├── Valida sintaxe YAML
-  ├── Valida schema (campos obrigatórios, enums, etc.)
-  ├── Valida sintaxe SPL via Splunk REST API
-  └── Bloqueia merge se houver erro
-        ↓
-  Code review + aprovação
-        ↓
-  Merge para main
-        ↓
-GitHub Actions deploy
-  ├── Dry-run (preview do que vai mudar)
-  └── Deploy via Splunk REST API (create/update)
+Analyst creates or edits a detection YAML file
+              │
+              ▼
+     git push → open Pull Request
+              │
+              ▼
+  GitHub Actions  (self-hosted runner on Orbstack)
+  ┌────────────────────────────────────────┐
+  │  1. YAML syntax check                  │
+  │  2. JSON Schema validation             │
+  │  3. SPL syntax check (Splunk REST API) │
+  │  → PR blocked if any check fails       │
+  └────────────────────────────────────────┘
+              │
+              ▼
+     Code review + approval
+              │
+              ▼
+        Merge to main
+              │
+              ▼
+  GitHub Actions deploy
+  ┌────────────────────────────────────────┐
+  │  1. Dry-run (preview changes)          │
+  │  2. Create or update saved search      │
+  │     via Splunk REST API                │
+  └────────────────────────────────────────┘
 ```
 
-## Estrutura do repositório
+## Repository structure
 
 ```
 .
 ├── detections/
-│   ├── endpoint/          # Detecções de endpoint (Windows, Linux)
-│   ├── network/           # Detecções de rede
-│   └── identity/          # Detecções de identidade/acesso
-├── scripts/
-│   ├── validate.py        # Validação de schema + SPL
-│   ├── deploy.py          # Deploy via REST API
-│   └── splunk_client.py   # Cliente Splunk REST
+│   ├── endpoint/          # Endpoint detections (Windows, Linux)
+│   ├── network/           # Network detections
+│   └── identity/          # Identity and access detections
+├── docs/
+│   ├── splunk-setup.md    # How to run Splunk locally with Orbstack
+│   └── runner-setup.md    # How to set up the self-hosted runner container
+├── runner/
+│   ├── Dockerfile         # Ubuntu 24.04 image with GitHub Actions runner
+│   └── entrypoint.sh      # Registers runner on start, deregisters on stop
 ├── schemas/
-│   └── detection.schema.json  # JSON Schema para as detecções
+│   └── detection.schema.json  # JSON Schema — validated on every PR
+├── scripts/
+│   ├── validate.py        # Schema + SPL syntax validation
+│   ├── deploy.py          # Deploy detections via Splunk REST API
+│   └── splunk_client.py   # Splunk REST API client
 ├── .github/workflows/
-│   ├── validate-pr.yml    # Roda em todo PR
-│   └── deploy.yml         # Roda no merge para main
+│   ├── validate-pr.yml    # Triggered on every PR touching detections/
+│   └── deploy.yml         # Triggered on every merge to main
+├── docker-compose.yml     # Starts the self-hosted runner container
+├── .env.example           # Environment variable template
 └── .pre-commit-config.yaml
 ```
 
-## Formato de uma detecção
+## Detection file format
 
 ```yaml
-name: "Nome legível da detecção"
-id: "uuid-v4-unico"          # gere com: python -c "import uuid; print(uuid.uuid4())"
-version: 1                    # incremente a cada mudança
-status: draft                 # draft | testing | production | deprecated
-author: "seu-nome"
+name: "Descriptive detection name"
+id: "uuid-v4"             # generate: python3 -c "import uuid; print(uuid.uuid4())"
+version: 1                # increment on every change
+status: draft             # draft | testing | production | deprecated
+author: "your-name"
 date: "2026-05-06"
 modified: "2026-05-06"
-description: "O que detecta e por quê (mínimo 10 chars)"
-type: alert                   # alert | report | scheduled_report
+description: "What this detects and why (min 10 characters)"
+type: alert               # alert | report | scheduled_report
 
 search: |
   index=windows EventCode=4732
@@ -69,137 +87,111 @@ schedule:
 
 alert:
   condition: "search count > 0"
-  severity: high              # informational | low | medium | high | critical
+  severity: high          # informational | low | medium | high | critical
   suppress: false
 
 tags:
   mitre_attack:
-    - T1098                   # formato obrigatório: T####(.###)
+    - T1098               # required format: T####(.###)
   platform:
-    - Windows                 # Windows | Linux | macOS | AWS | Azure | GCP | Network
-  category: identity          # endpoint | network | identity | cloud | application
+    - Windows             # Windows | Linux | macOS | AWS | Azure | GCP | Network
+  category: identity      # endpoint | network | identity | cloud | application
 
-splunk_app: "search"
+splunk_app: "search"      # target Splunk app (defaults to search)
 ```
 
-## Setup local
+> **Status → Splunk state mapping:**
+> `production` → enabled | all other statuses → created as disabled
 
-### 1. Instalar dependências
+## Validated fields
+
+| Field | Required | Validation |
+|---|---|---|
+| `name` | Yes | min 5 characters |
+| `id` | Yes | UUID v4 format |
+| `version` | Yes | integer ≥ 1 |
+| `status` | Yes | enum |
+| `author` | Yes | string |
+| `description` | Yes | min 10 characters |
+| `type` | Yes | enum |
+| `search` | Yes | string + live SPL check via Splunk API |
+| `tags.category` | Yes | enum |
+| `tags.mitre_attack` | No | format `T####(.###)` — warning if missing |
+
+## Local setup
+
+### 1. Install Python dependencies and pre-commit hooks
 
 ```bash
 make setup
 ```
 
-### 2. Configurar variáveis de ambiente
+### 2. Set environment variables
 
 ```bash
 export SPLUNK_URL="https://localhost:8089"
 export SPLUNK_TOKEN="<your-token>"
-# ou autenticação por usuário/senha:
-export SPLUNK_USERNAME="admin"
-export SPLUNK_PASSWORD="<your-password>"
 ```
 
-Para obter um token no Splunk:
-**Settings → Tokens → New Token**
-
-### 3. Validar detecções localmente
+### 3. Validate detections locally
 
 ```bash
-# Sem conectar ao Splunk (só schema)
+# Schema only (no Splunk connection needed)
 make validate
 
-# Com validação de SPL via API
+# Schema + live SPL syntax check
 make validate-splunk
 
-# Arquivo específico
-python scripts/validate.py detections/endpoint/detect_powershell_encoded_command.yml
+# Single file
+python3 scripts/validate.py detections/endpoint/detect_new_local_admin.yml
 ```
 
-### 4. Deploy manual
+### 4. Deploy manually
 
 ```bash
-# Preview sem alterar nada
-make deploy-dry
-
-# Deploy de todas as detecções
-make deploy
-
-# Deploy de arquivo específico
-python scripts/deploy.py detections/endpoint/detect_new_local_admin.yml
+make deploy-dry    # preview without changes
+make deploy        # deploy all detections
 ```
 
-## Configurar o self-hosted runner
+## Infrastructure setup
 
-Os workflows usam `runs-on: self-hosted` porque o Splunk está rodando localmente no Orbstack e os runners do GitHub não têm acesso a `localhost`.
+Before the CI/CD pipeline works, you need two things running locally:
 
-### Instalar o runner na sua máquina
+| Component | Guide |
+|---|---|
+| Splunk (Docker/Orbstack) | [docs/splunk-setup.md](docs/splunk-setup.md) |
+| GitHub Actions runner (Docker/Orbstack) | [docs/runner-setup.md](docs/runner-setup.md) |
 
-1. No GitHub: **Settings → Actions → Runners → New self-hosted runner**
-2. Selecione **macOS** e siga as instruções
-3. No diretório do runner, configure e inicie:
+## GitHub secrets and variables
 
-```bash
-./config.sh --url https://github.com/SEU_USER/SEU_REPO --token TOKEN_GERADO
-./run.sh
-```
+Go to **Settings → Secrets and variables → Actions** and add:
 
-Para rodar como serviço em background:
-```bash
-./svc.sh install
-./svc.sh start
-```
+| Type | Name | Value |
+|---|---|---|
+| Secret | `SPLUNK_URL` | `https://host.internal:8089` |
+| Secret | `SPLUNK_TOKEN` | token from Splunk Settings → Tokens |
+| Variable | `SPLUNK_APP` | `search` (or your custom app) |
 
-### Variáveis e secrets no GitHub
+> `host.internal` resolves to the macOS host from inside the Orbstack runner container.
+> Use `localhost:8089` only when running scripts directly on the Mac.
 
-Vá em **Settings → Secrets and variables → Actions** e adicione:
-
-| Tipo | Nome | Valor |
-|------|------|-------|
-| Secret | `SPLUNK_URL` | `https://localhost:8089` |
-| Secret | `SPLUNK_TOKEN` | token gerado no Splunk |
-| Variable | `SPLUNK_APP` | `search` (ou seu app customizado) |
-
-> O Orbstack expõe as portas dos containers diretamente em `localhost` na máquina host.
-> Se usar VM em vez de container, use o IP da VM: `https://splunk.orb.local:8089`
-
-## Fluxo do analista
+## Analyst workflow
 
 ```bash
-# 1. Criar branch para a nova detecção
-git checkout -b detection/detect-brute-force-login
+# 1. Create a branch for the new detection
+git checkout -b detection/brute-force-login
 
-# 2. Criar o arquivo de detecção
-# (use um UUID novo: python -c "import uuid; print(uuid.uuid4())")
+# 2. Write the detection file
 vim detections/identity/detect_brute_force_login.yml
 
-# 3. Validar localmente antes de commitar
-python scripts/validate.py --no-splunk detections/identity/detect_brute_force_login.yml
+# 3. Validate locally before committing
+python3 scripts/validate.py --no-splunk detections/identity/detect_brute_force_login.yml
 
-# 4. Commitar e abrir PR
+# 4. Commit and push — pre-commit hooks run automatically
 git add detections/identity/detect_brute_force_login.yml
 git commit -m "feat: add brute force login detection"
-git push origin detection/detect-brute-force-login
-# → GitHub Actions roda a validação automaticamente no PR
+git push origin detection/brute-force-login
 
-# 5. Após aprovação e merge → deploy automático
+# 5. Open PR → CI validates automatically
+# 6. After approval and merge → CI deploys automatically
 ```
-
-## Campos obrigatórios e validações
-
-| Campo | Obrigatório | Validação |
-|-------|-------------|-----------|
-| `name` | Sim | min 5 chars |
-| `id` | Sim | UUID v4 |
-| `version` | Sim | inteiro >= 1 |
-| `status` | Sim | enum: draft/testing/production/deprecated |
-| `author` | Sim | string |
-| `description` | Sim | min 10 chars |
-| `type` | Sim | enum: alert/report/scheduled_report |
-| `search` | Sim | string SPL + sintaxe válida (via Splunk API) |
-| `tags.category` | Sim | enum: endpoint/network/identity/cloud/application |
-| `tags.mitre_attack` | Não | formato T####(.###) |
-
-> Detecções com `status: draft` ou sem tags MITRE geram **warnings** (não bloqueiam o PR).
-> Detecções com `status: production` são habilitadas automaticamente no Splunk.
-> Detecções com outros status são criadas como **disabled** no Splunk.

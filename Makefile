@@ -1,21 +1,27 @@
-.PHONY: setup validate validate-splunk deploy-dry deploy install-hooks
+.PHONY: setup validate validate-splunk deploy-dry deploy runner-build runner-up runner-down
 
 setup:
-	pip install -r requirements.txt
+	pip3 install -r requirements.txt
 	pre-commit install
-	@echo "Setup complete. Configure SPLUNK_URL, SPLUNK_TOKEN in your environment."
+	@echo "Setup complete. Set SPLUNK_URL and SPLUNK_TOKEN in your environment."
 
 validate:
-	python scripts/validate.py --all --no-splunk
+	python3 scripts/validate.py --all --no-splunk
 
 validate-splunk:
-	python scripts/validate.py --all
+	python3 scripts/validate.py --all
 
 deploy-dry:
-	python scripts/deploy.py --all --dry-run
+	python3 scripts/deploy.py --all --dry-run
 
 deploy:
-	python scripts/deploy.py --all
+	python3 scripts/deploy.py --all
 
-install-hooks:
-	pre-commit install
+runner-build:
+	docker compose build
+
+runner-up:
+	docker compose up -d
+
+runner-down:
+	docker compose down
