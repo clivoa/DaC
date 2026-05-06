@@ -53,6 +53,10 @@ The deploy workflow should not run from analyst branches. This keeps Splunk depl
 
 These settings block direct changes to `main`, including accidental pushes from repository administrators during the simulation.
 
+Private repositories require a GitHub plan that supports branch protections or repository rulesets. If that feature is not available, do not treat the workflow as enforceable for users with write access. Either upgrade the GitHub plan, move the repository to an organization plan that supports rulesets, or give analysts read access and collect changes through forks/PRs instead of direct repository branches.
+
+The deploy workflow also verifies that production deployments come from a merged PR into `main`. This is a safety guard for deployment, not a replacement for branch protection.
+
 ## Detection deletion policy
 
 Detection files should not be deleted as part of the normal analyst workflow. Set `status: deprecated` instead and handle Splunk removal through a deliberate decommission process.
