@@ -42,15 +42,32 @@ The runner container uses `host.internal` (mapped to the Orbstack host via `extr
 cp .env.example .env
 ```
 
-Edit `.env` with your values:
+Edit `.env` with your values. There are two authentication modes:
 
+**Option A — One-time registration token** (from GitHub UI, expires ~1 hour)
 ```dotenv
 GITHUB_OWNER=your-github-username
 GITHUB_REPO=your-repo-name
-GITHUB_PAT=<pat-with-repo-scope>
+RUNNER_TOKEN=<token-from-github-ui>   # Settings → Actions → Runners → New runner
+SPLUNK_URL=https://host.internal:8089
+SPLUNK_USERNAME=admin
+SPLUNK_PASSWORD=<your-password>
+```
+
+The registration config is persisted in a Docker volume (`runner_config`).
+On subsequent container restarts, the token is not needed again.
+
+**Option B — Personal Access Token** (recommended for production, never expires)
+```dotenv
+GITHUB_OWNER=your-github-username
+GITHUB_REPO=your-repo-name
+GITHUB_PAT=<pat-with-repo-scope>   # Settings → Tokens → repo scope
 SPLUNK_URL=https://host.internal:8089
 SPLUNK_TOKEN=<your-splunk-api-token>
 ```
+
+The PAT fetches a fresh registration token on every container start and enables
+graceful deregistration when the container stops.
 
 ---
 
@@ -58,10 +75,10 @@ SPLUNK_TOKEN=<your-splunk-api-token>
 
 ```bash
 # Build the image (only needed on first run or after runner/Dockerfile changes)
-docker compose build
+make runner-build
 
 # Start the runner in the background
-docker compose up -d
+make runner-up
 
 # Confirm it registered successfully
 docker compose logs -f gh-runner
@@ -70,10 +87,14 @@ docker compose logs -f gh-runner
 Expected log output:
 ```
 ==> Fetching registration token...
-==> Configuring runner 'dac-runner' for https://github.com/owner/repo
+==> Configuring runner 'dac-runner' → https://github.com/owner/repo
     Labels: self-hosted,linux,dac
-...
-==> Runner is ready. Waiting for jobs...
+√ Connected to GitHub
+√ Runner successfully added
+√ Settings Saved.
+==> Runner ready. Waiting for jobs...
+Current runner version: '2.334.0'
+Listening for Jobs
 ```
 
 ---
