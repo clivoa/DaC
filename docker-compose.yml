@@ -1,0 +1,33 @@
+services:
+  gh-runner:
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
+      args:
+        RUNNER_VERSION: "2.334.0"
+    image: dac-gh-runner:latest
+    container_name: dac-gh-runner
+    restart: unless-stopped
+    environment:
+      # GitHub identity — required
+      GITHUB_OWNER: ${GITHUB_OWNER}
+      GITHUB_REPO: ${GITHUB_REPO}
+      GITHUB_PAT: ${GITHUB_PAT}
+      # Runner identity — optional
+      RUNNER_NAME: ${RUNNER_NAME:-dac-runner}
+      RUNNER_LABELS: ${RUNNER_LABELS:-self-hosted,linux,dac}
+      # Splunk connection — used by validate.py and deploy.py inside workflows
+      SPLUNK_URL: ${SPLUNK_URL:-https://host.internal:8089}
+      SPLUNK_TOKEN: ${SPLUNK_TOKEN:-}
+      SPLUNK_USERNAME: ${SPLUNK_USERNAME:-}
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-}
+      SPLUNK_APP: ${SPLUNK_APP:-search}
+    extra_hosts:
+      # Allows the runner container to reach the Orbstack host (where Splunk runs)
+      # 'host-gateway' resolves to the host machine IP automatically
+      - "host.internal:host-gateway"
+    volumes:
+      - runner_work:/home/runner/actions-runner/_work
+
+volumes:
+  runner_work:

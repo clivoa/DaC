@@ -9,7 +9,8 @@ on:
 jobs:
   validate:
     name: Validate Changed Detections
-    runs-on: self-hosted  # needs access to local Splunk via Orbstack
+    # Runs on the self-hosted Ubuntu runner (Orbstack) — needs local Splunk access
+    runs-on: [self-hosted, linux, dac]
 
     steps:
       - name: Checkout
@@ -17,14 +18,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip3 install --break-system-packages -r requirements.txt
 
       - name: Identify changed detection files
         id: changed
@@ -44,7 +39,7 @@ jobs:
           SPLUNK_URL: ${{ secrets.SPLUNK_URL }}
           SPLUNK_TOKEN: ${{ secrets.SPLUNK_TOKEN }}
         run: |
-          python scripts/validate.py \
+          python3 scripts/validate.py \
             --github-annotations \
             ${{ steps.changed.outputs.files }}
 

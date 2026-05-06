@@ -9,7 +9,8 @@ on:
 jobs:
   deploy:
     name: Deploy to Splunk
-    runs-on: self-hosted  # needs access to local Splunk via Orbstack
+    # Runs on the self-hosted Ubuntu runner (Orbstack) — needs local Splunk access
+    runs-on: [self-hosted, linux, dac]
 
     steps:
       - name: Checkout
@@ -17,14 +18,8 @@ jobs:
         with:
           fetch-depth: 2  # need previous commit to diff
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip3 install --break-system-packages -r requirements.txt
 
       - name: Identify changed detection files
         id: changed
@@ -40,7 +35,7 @@ jobs:
           SPLUNK_TOKEN: ${{ secrets.SPLUNK_TOKEN }}
           SPLUNK_APP: ${{ vars.SPLUNK_APP || 'search' }}
         run: |
-          python scripts/deploy.py \
+          python3 scripts/deploy.py \
             --dry-run \
             ${{ steps.changed.outputs.files }}
 
@@ -51,7 +46,7 @@ jobs:
           SPLUNK_TOKEN: ${{ secrets.SPLUNK_TOKEN }}
           SPLUNK_APP: ${{ vars.SPLUNK_APP || 'search' }}
         run: |
-          python scripts/deploy.py \
+          python3 scripts/deploy.py \
             ${{ steps.changed.outputs.files }}
 
       - name: No detections changed
