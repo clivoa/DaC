@@ -32,10 +32,10 @@ RUN useradd -m -s /bin/bash runner && \
     echo "runner ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 # Pre-install Python dependencies used by detection scripts
-COPY ../requirements.txt /tmp/requirements.txt
+COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --break-system-packages -r /tmp/requirements.txt
 
-COPY entrypoint.sh /entrypoint.sh
+COPY runner/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 WORKDIR /home/runner/actions-runner

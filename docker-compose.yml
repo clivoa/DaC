@@ -12,7 +12,9 @@ services:
       # GitHub identity — required
       GITHUB_OWNER: ${GITHUB_OWNER}
       GITHUB_REPO: ${GITHUB_REPO}
-      GITHUB_PAT: ${GITHUB_PAT}
+      # Auth — use RUNNER_TOKEN (one-time, from GitHub UI) or GITHUB_PAT (persistent)
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
       # Runner identity — optional
       RUNNER_NAME: ${RUNNER_NAME:-dac-runner}
       RUNNER_LABELS: ${RUNNER_LABELS:-self-hosted,linux,dac}
@@ -24,10 +26,13 @@ services:
       SPLUNK_APP: ${SPLUNK_APP:-search}
     extra_hosts:
       # Allows the runner container to reach the Orbstack host (where Splunk runs)
-      # 'host-gateway' resolves to the host machine IP automatically
       - "host.internal:host-gateway"
     volumes:
+      # Persists runner registration (.runner, .credentials) so RUNNER_TOKEN
+      # is only needed on the very first start — subsequent restarts reuse it
+      - runner_config:/home/runner/actions-runner
       - runner_work:/home/runner/actions-runner/_work
 
 volumes:
+  runner_config:
   runner_work:
