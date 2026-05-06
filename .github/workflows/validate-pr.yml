@@ -2,8 +2,15 @@ name: Validate Detection PR
 
 on:
   pull_request:
-    # Runs on every PR targeting dev (analyst submissions) or main (dev→main promotion).
+    # Run only when a PR can affect detection validation or Splunk-ready content.
     branches: [dev, main]
+    paths:
+      - "detections/**/*.yml"
+      - "schemas/**"
+      - "scripts/validate.py"
+      - "scripts/splunk_client.py"
+      - "requirements.txt"
+      - ".github/workflows/validate-pr.yml"
 
 permissions:
   contents: read
@@ -30,8 +37,24 @@ jobs:
         shell: bash
         run: |
           git fetch origin "${{ github.base_ref }}" --depth=1
-          CHANGED=$(git diff --name-only --diff-filter=ACMRT "origin/${{ github.base_ref }}...HEAD" -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
-          DELETED=$(git diff --name-only --diff-filter=D "origin/${{ github.base_ref }}...HEAD" -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          BASE="origin/${{ github.base_ref }}...HEAD"
+          SUPPORT_CHANGED=$(git diff --name-only --diff-filter=ACMRT "$BASE" -- \
+            'schemas/**' \
+            'scripts/validate.py' \
+            'scripts/splunk_client.py' \
+            'requirements.txt' \
+            '.github/workflows/validate-pr.yml' \
+            | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+
+          if [ -n "$SUPPORT_CHANGED" ]; then
+            CHANGED=$(find detections -type f -name '*.yml' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+            echo "Validation support changed: $SUPPORT_CHANGED"
+            echo "Validating all detection files."
+          else
+            CHANGED=$(git diff --name-only --diff-filter=ACMRT "$BASE" -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          fi
+
+          DELETED=$(git diff --name-only --diff-filter=D "$BASE" -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
           echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
           echo "deleted=$DELETED" >> "$GITHUB_OUTPUT"
           if [ -n "$DELETED" ]; then echo "Deleted detections: $DELETED"; fi
