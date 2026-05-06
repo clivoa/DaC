@@ -1,0 +1,37 @@
+name: "Detect PowerShell Encoded Command Execution"
+id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+version: 1
+status: testing
+author: "security-team"
+date: "2026-05-06"
+modified: "2026-05-06"
+description: "Detects PowerShell execution with base64 encoded commands, a common obfuscation technique used to hide malicious payloads from basic string-based detection"
+type: alert
+search: |
+  index=windows source="WinEventLog:Microsoft-Windows-PowerShell/Operational" EventCode=4104
+  | where match(ScriptBlockText, "(?i)-enc(oded(command)?)?\s+[A-Za-z0-9+/]{20,}={0,2}")
+  | eval severity=case(
+      match(ScriptBlockText, "(?i)(iex|invoke-expression|downloadstring|webclient|bypass)"), "high",
+      true(), "medium"
+    )
+  | stats count min(_time) as first_seen max(_time) as last_seen
+      values(ScriptBlockText) as commands
+      by ComputerName, User, severity
+  | where count > 0
+  | sort -count
+schedule:
+  cron: "*/15 * * * *"
+  earliest: "-15m"
+  latest: "now"
+alert:
+  condition: "search count > 0"
+  severity: high
+  suppress: false
+tags:
+  mitre_attack:
+    - T1059.001
+    - T1027
+  platform:
+    - Windows
+  category: endpoint
+splunk_app: "search"

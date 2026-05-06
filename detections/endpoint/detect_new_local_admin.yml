@@ -1,0 +1,31 @@
+name: "Detect New Member Added to Local Administrators Group"
+id: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
+version: 1
+status: production
+author: "security-team"
+date: "2026-05-06"
+modified: "2026-05-06"
+description: "Detects when an account is added to the local Administrators group via Security Event 4732, which may indicate privilege escalation or unauthorized access"
+type: alert
+search: |
+  index=windows EventCode=4732
+  | where Group_Name="Administrators"
+  | eval action="Added to Administrators Group"
+  | table _time, ComputerName, Member_Name, Account_Name, Group_Name, action
+  | sort -_time
+schedule:
+  cron: "*/5 * * * *"
+  earliest: "-5m"
+  latest: "now"
+alert:
+  condition: "search count > 0"
+  severity: critical
+  suppress: false
+tags:
+  mitre_attack:
+    - T1098
+    - T1078.003
+  platform:
+    - Windows
+  category: identity
+splunk_app: "search"

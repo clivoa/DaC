@@ -1,0 +1,22 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+        name: Check YAML syntax
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: validate-detections
+        name: Validate detection schema (offline)
+        language: python
+        entry: python scripts/validate.py
+        args: [--no-splunk]
+        files: ^detections/.*\.yml$
+        additional_dependencies:
+          - pyyaml>=6.0
+          - jsonschema>=4.17
