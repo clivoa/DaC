@@ -28,9 +28,9 @@ class SplunkClient:
 
     def validate_spl(self, search: str) -> Dict[str, Any]:
         """Use Splunk's parser endpoint to check SPL syntax."""
-        resp = self.session.get(
+        resp = self.session.post(
             f"{self.base_url}/services/search/parser",
-            params={"q": f"search {search}", "output_mode": "json"},
+            data={"q": f"search {search}", "output_mode": "json"},
             timeout=30,
         )
         resp.raise_for_status()
