@@ -1,16 +1,17 @@
 name: "Detect Suspicious CMD Execution"
 id: "e6f7a8b9-c0d1-4e2f-b3c4-d5e6f7a8b9c0"
 version: 1
-status: active                # WRONG: not in enum (draft/testing/production/deprecated)
+status: testing
 author: "simulation"
 date: "2026-05-06"
 modified: "2026-05-06"
-                              # MISSING: required field 'description'
+description: "Detects cmd.exe processes spawned via Event ID 4688 (process creation), which may indicate command-line based execution techniques"
 type: alert
 search: |
   index=windows EventCode=4688
-  | eval is_suspicious = if(match(NewProcessName, "(?i)cmd\.exe"),
-  | stats count by ComputerName, User, is_suspicious
+  | eval is_suspicious = if(match(NewProcessName, "(?i)cmd\.exe"), "yes", "no")
+  | where is_suspicious="yes"
+  | stats count by ComputerName, User, NewProcessName, CommandLine
   | where count > 0
 schedule:
   cron: "*/15 * * * *"
