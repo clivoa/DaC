@@ -2,7 +2,7 @@ name: "Detect Brute Force Login Attempts"
 id: "d5e6f7a8-b9c0-4d1e-af2b-3c4d5e6f7a8b"
 version: 1
 status: testing
-author: "simulation"
+author: "security-team"
 date: "2026-05-06"
 modified: "2026-05-06"
 description: "Detects brute force login attempts by identifying accounts with a high number of failed authentication events within a short window"

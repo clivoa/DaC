@@ -2,7 +2,8 @@ name: Validate Detection PR
 
 on:
   pull_request:
-    branches: [main]
+    # Runs on every PR targeting dev (analyst submissions) or main (dev→main promotion).
+    branches: [dev, main]
 
 permissions:
   contents: read
@@ -11,7 +12,8 @@ permissions:
 jobs:
   validate:
     name: Validate Changed Detections
-    # Runs on the self-hosted Ubuntu runner (Orbstack) — needs local Splunk access
+    # Runs on the self-hosted Ubuntu runner — needs access to Splunk for live SPL checks.
+    # See docs/runner-setup.md for setup instructions.
     runs-on: [self-hosted, linux, dac]
 
     steps:
@@ -32,19 +34,13 @@ jobs:
           DELETED=$(git diff --name-only --diff-filter=D "origin/${{ github.base_ref }}...HEAD" -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
           echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
           echo "deleted=$DELETED" >> "$GITHUB_OUTPUT"
-          if [ -n "$DELETED" ]; then
-            echo "Deleted detections: $DELETED"
-          fi
-          if [ -z "$CHANGED" ]; then
-            echo "No detection files changed."
-          else
-            echo "Changed detections: $CHANGED"
-          fi
+          if [ -n "$DELETED" ]; then echo "Deleted detections: $DELETED"; fi
+          if [ -z "$CHANGED" ]; then echo "No detection files changed."; else echo "Changed detections: $CHANGED"; fi
 
       - name: Block deleted detection files
         if: steps.changed.outputs.deleted != ''
         run: |
-          echo "::error::Detection files must not be deleted from the repository. Set status: deprecated instead, then handle Splunk removal through an explicit decommission process."
+          echo "::error::Detection files must not be deleted. Set status: deprecated instead, then handle Splunk removal through an explicit decommission process."
           echo "Deleted detections: ${{ steps.changed.outputs.deleted }}"
           exit 1
 

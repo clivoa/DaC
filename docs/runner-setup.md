@@ -10,13 +10,13 @@ The runner is an Ubuntu 24.04 container built with Docker and managed via `docke
 
 ```
 macOS host (Orbstack)
-├── splunk container        ← port 8089 exposed on localhost
-└── dac-gh-runner container ← reaches Splunk via host.internal:8089
+├── splunk container        (dac_default network, port 8089)
+└── dac-gh-runner container (dac_default network)
         │
         └── connects to GitHub → executes workflow jobs
 ```
 
-The runner container uses `host.internal` (mapped to the Orbstack host via `extra_hosts`) to reach the Splunk REST API at `https://host.internal:8089`.
+Both containers share the `dac_default` Docker network. The runner reaches Splunk at `https://splunk:8089` using the container hostname directly — no host port mapping required.
 
 ---
 
@@ -24,19 +24,11 @@ The runner container uses `host.internal` (mapped to the Orbstack host via `extr
 
 - Orbstack running with the Splunk container healthy (see [splunk-setup.md](splunk-setup.md))
 - Docker Compose v2 (`docker compose` command available)
-- A GitHub Personal Access Token (PAT) with **`repo`** scope
+- A GitHub account with write access to the repository
 
 ---
 
-## 1. Create the PAT
-
-1. Go to https://github.com/settings/tokens → **Generate new token (classic)**
-2. Grant the **`repo`** scope (full control of private repos)
-3. Copy the token
-
----
-
-## 2. Configure environment variables
+## 1. Configure environment variables
 
 ```bash
 cp .env.example .env
@@ -47,40 +39,47 @@ Edit `.env` with your values. There are two authentication modes:
 **Option A — One-time registration token** (from GitHub UI, expires ~1 hour)
 ```dotenv
 GITHUB_OWNER=your-github-username
-GITHUB_REPO=your-repo-name
+GITHUB_REPO=DaC
 RUNNER_TOKEN=<token-from-github-ui>   # Settings → Actions → Runners → New runner
-SPLUNK_URL=https://host.internal:8089
-SPLUNK_USERNAME=admin
-SPLUNK_PASSWORD=<your-password>
-```
-
-The registration config is persisted in a Docker volume (`runner_config`).
-On subsequent container restarts, the token is not needed again.
-
-**Option B — Personal Access Token** (recommended for production, never expires)
-```dotenv
-GITHUB_OWNER=your-github-username
-GITHUB_REPO=your-repo-name
-GITHUB_PAT=<pat-with-repo-scope>   # Settings → Tokens → repo scope
-SPLUNK_URL=https://host.internal:8089
+SPLUNK_URL=https://splunk:8089
 SPLUNK_TOKEN=<your-splunk-api-token>
 ```
 
-The PAT fetches a fresh registration token on every container start and enables
-graceful deregistration when the container stops.
+The registration config is persisted in a Docker volume (`runner_config`).
+On subsequent container restarts, the token is not needed again — the runner reuses its saved credentials.
+
+**Option B — Personal Access Token** (recommended, auto-refreshes on each start)
+```dotenv
+GITHUB_OWNER=your-github-username
+GITHUB_REPO=DaC
+GITHUB_PAT=<pat-with-repo-scope>   # github.com/settings/tokens
+SPLUNK_URL=https://splunk:8089
+SPLUNK_TOKEN=<your-splunk-api-token>
+```
+
+The PAT fetches a fresh registration token on every container start and enables graceful deregistration on stop.
+
+---
+
+## 2. Connect Splunk to the shared network
+
+The runner and Splunk must share the `dac_default` Docker network. Run once after the Splunk container is started:
+
+```bash
+docker network connect dac_default splunk
+```
+
+> Repeat this step any time the Splunk container is recreated.
 
 ---
 
 ## 3. Build and start the runner
 
 ```bash
-# Build the image (only needed on first run or after runner/Dockerfile changes)
-make runner-build
+make runner-build   # build the image (first run or after Dockerfile changes)
+make runner-up      # start the runner container
 
-# Start the runner in the background
-make runner-up
-
-# Confirm it registered successfully
+# Verify registration succeeded
 docker compose logs -f gh-runner
 ```
 
@@ -109,13 +108,11 @@ The `dac-runner` should appear with status **Idle**.
 
 ## 5. How workflows target this runner
 
-The workflows use:
-
 ```yaml
 runs-on: [self-hosted, linux, dac]
 ```
 
-All three labels must match what the runner was registered with (`RUNNER_LABELS=self-hosted,linux,dac`).
+All three labels must match `RUNNER_LABELS` in your `.env`.
 
 ---
 
@@ -125,7 +122,7 @@ Check the latest version at https://github.com/actions/runner/releases, then upd
 
 ```yaml
 args:
-  RUNNER_VERSION: "2.335.0"  # update here
+  RUNNER_VERSION: "2.335.0"
 ```
 
 Rebuild and restart:
@@ -139,33 +136,61 @@ docker compose build && docker compose up -d
 ## 7. Day-to-day management
 
 ```bash
-# Stop runner (auto-deregisters from GitHub)
-docker compose down
-
-# View logs
-docker compose logs -f gh-runner
-
-# Restart
-docker compose restart gh-runner
+docker compose down               # Stop and deregister runner
+docker compose logs -f gh-runner  # View logs
+docker compose restart gh-runner  # Restart
 ```
 
 ---
 
 ## 8. Troubleshooting
 
-**Runner shows as offline on GitHub:**
-Check that the container is still running and that the PAT hasn't expired.
+**Runner shows as offline on GitHub**
+
 ```bash
 docker compose ps
 docker compose logs gh-runner --tail 50
 ```
 
-**Cannot reach Splunk (`host.internal` not resolving):**
-Verify the `extra_hosts` entry in `docker-compose.yml` and that Splunk is actually healthy:
+**Runner stuck with "A session for this runner already exists"**
+
+The previous session did not deregister cleanly. Force a fresh registration:
+
 ```bash
-docker compose exec gh-runner curl -sk https://host.internal:8089/services/server/info \
-  -H "Authorization: Bearer ${SPLUNK_TOKEN}" -o /dev/null -w "%{http_code}\n"
+# 1. Delete the runner from GitHub
+gh api repos/<owner>/<repo>/actions/runners \
+  --jq '.runners[] | select(.name=="dac-runner") | .id' \
+  | xargs -I{} gh api repos/<owner>/<repo>/actions/runners/{} -X DELETE
+
+# 2. Clear saved credentials from the volume
+docker compose stop gh-runner
+docker run --rm -v dac_runner_config:/config ubuntu:24.04 \
+  sh -c "rm -f /config/.runner /config/.credentials /config/.credentials_rsaparams"
+
+# 3. Set a fresh RUNNER_TOKEN in .env and restart
+docker compose up -d
 ```
 
-**Runner token expired before startup:**
-PAT-based registration fetches a fresh token each time the container starts — no manual rotation needed.
+**Cannot reach Splunk from the runner**
+
+```bash
+# Verify the containers share the dac_default network
+docker network inspect dac_default --format '{{range .Containers}}{{.Name}} {{end}}'
+# Expected: dac-gh-runner splunk
+
+# If splunk is missing, reconnect it
+docker network connect dac_default splunk
+
+# Test connectivity
+docker exec dac-gh-runner curl -sk https://splunk:8089/services/server/info \
+  -H "Authorization: Bearer <your-token>" -o /dev/null -w "%{http_code}\n"
+# Expected: 200
+```
+
+**`_work` directory permission denied**
+
+Occurs when the volume was written by root. Fix with:
+
+```bash
+docker exec -u root dac-gh-runner chown -R runner:runner /home/runner/actions-runner/_work
+```

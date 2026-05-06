@@ -1,45 +1,78 @@
 # GitHub Governance for Detection as Code
 
-This repository models an enterprise Detection as Code workflow where detection content is reviewed, validated, merged, and deployed through GitHub.
-
 ## Branch model
 
-`main` is the production branch. A change merged into `main` is eligible for deployment to Splunk.
+The repository uses two permanent branches:
 
-Analysts work in short-lived branches using this naming pattern:
+| Branch | Purpose | Who can push directly |
+|---|---|---|
+| `dev` | Staging — analysts submit detections here | Nobody |
+| `main` | Production — only promoted from `dev` | Nobody |
 
-```text
-dev/<analyst>/<change-summary>
+All changes to either branch must go through a pull request.
+
+### Analyst workflow
+
+```
+git checkout dev && git pull origin dev
+git checkout -b dev/<your-name>/<detection-name>
+
+# write and validate your detection
+git push origin dev/<your-name>/<detection-name>
+# open PR → target: dev
+```
+
+After review and merge to `dev`, a separate PR promotes the changes to `main`:
+
+```
+PR: dev → main
+  CI validates again
+  Approving review required
+  Merge → deploy to Splunk
+```
+
+### Branch naming convention
+
+```
+dev/<analyst-name>/<change-summary>
 ```
 
 Examples:
-
-```text
-dev/alice/brute-force-login
-dev/bruno/powershell-encoded-command
-dev/security-team/internal-port-scan-tuning
+```
+dev/alice/brute-force-rdp
+dev/bob/powershell-encoding-tuning
+dev/security-team/lateral-movement-coverage
 ```
 
-Avoid a single shared `dev` branch. With multiple analysts, shared development branches become hard to review, hard to clean up, and easy to break accidentally. Short-lived analyst branches keep each change isolated and make PR ownership clear.
+Avoid a shared `dev` branch per analyst (e.g. `dev/alice`). Short-lived, scoped branches keep each change isolated and make PR ownership unambiguous.
+
+---
 
 ## Pull request flow
 
-1. An analyst creates or updates detection YAML files under `detections/`.
-2. The analyst opens a PR into `main`.
-3. GitHub Actions runs `Validate Changed Detections`.
-4. The PR must pass validation and receive approval.
-5. The PR is merged into `main`.
-6. The deploy workflow runs from `main` and creates or updates Splunk saved searches.
+1. Analyst creates a branch from `dev` following the naming convention above
+2. Analyst writes or updates detection YAML files under `detections/`
+3. Analyst validates locally: `python3 scripts/validate.py --no-splunk <file>`
+4. Analyst opens a PR into `dev`
+5. CI runs `Validate Changed Detections` — schema + SPL syntax check
+6. At least one reviewer approves the detection logic
+7. Merge to `dev`
+8. A promotion PR (`dev → main`) is opened (manually or via automation)
+9. CI validates again
+10. Merge to `main`
+11. `Deploy Detections to Splunk` runs automatically
 
-The deploy workflow should not run from analyst branches. This keeps Splunk deployment tied to reviewed code only.
+The deploy workflow verifies that every push to `main` originated from a merged PR. This is a soft guard against accidental direct pushes.
 
-## Protected branch policy
+---
 
-`main` should be protected with these controls:
+## Protected branch settings
+
+Apply these settings to both `dev` and `main`:
 
 | Setting | Value |
 |---|---|
-| Require a pull request before merging | Enabled |
+| Require pull request before merging | Enabled |
 | Required approving reviews | `1` |
 | Dismiss stale approvals after new commits | Enabled |
 | Require approval of the most recent push | Enabled |
@@ -51,46 +84,51 @@ The deploy workflow should not run from analyst branches. This keeps Splunk depl
 | Allow deletions | Disabled |
 | Include administrators | Enabled |
 
-These settings block direct changes to `main`, including accidental pushes from repository administrators during the simulation.
+> **GitHub plan requirement:** Branch protection rules on private repositories require GitHub Pro or GitHub Enterprise. On the free plan, these settings cannot be enforced via the API.
+>
+> If branch protection is unavailable, the deploy workflow partially compensates — it blocks deployments that did not originate from a merged PR. However, this does not prevent direct pushes to `dev` or `main` by users with write access.
+>
+> **Mitigations for free plan:**
+> - Grant analysts `read` access only; submit changes via forks
+> - Move the repository to a GitHub organization on a paid plan
+> - Enable repository rulesets (available on some org plans at no extra cost)
 
-Private repositories require a GitHub plan that supports branch protections or repository rulesets. If that feature is not available, do not treat the workflow as enforceable for users with write access. Either upgrade the GitHub plan, move the repository to an organization plan that supports rulesets, or give analysts read access and collect changes through forks/PRs instead of direct repository branches.
-
-The deploy workflow also verifies that production deployments come from a merged PR into `main`. This is a safety guard for deployment, not a replacement for branch protection.
+---
 
 ## Detection deletion policy
 
-Detection files should not be deleted as part of the normal analyst workflow. Set `status: deprecated` instead and handle Splunk removal through a deliberate decommission process.
+Detection files must not be deleted from the repository. The CI pipeline blocks PRs that contain deleted detection files.
 
-The validation and deployment workflows block deleted detection files because a deleted YAML file does not contain enough information to safely remove or disable the matching Splunk saved search.
+To retire a detection:
+1. Set `status: deprecated` in the YAML file
+2. Merge the change — the detection is updated to disabled in Splunk
+3. Handle Splunk removal through a deliberate decommission step (manual or a separate workflow)
+
+Deleting a YAML file leaves no record of what the detection was, making it impossible to automate safe Splunk cleanup.
+
+---
 
 ## Branch cleanup
 
-Two cleanup mechanisms are used:
+| Mechanism | Trigger | Scope |
+|---|---|---|
+| GitHub "delete branch on merge" | Automatic after PR merge | The merged PR branch only |
+| `Cleanup Merged Branches` workflow | Weekly (Sunday 03:17 UTC) or manual | All merged analyst branches older than 14 days |
 
-| Mechanism | Purpose |
-|---|---|
-| GitHub delete branch on merge | Deletes PR branches immediately after merge |
-| `Cleanup Merged Branches` workflow | Removes stale merged branches that were not auto-deleted |
+The cleanup workflow only removes branches that:
+- Are already merged into `main`
+- Have a last commit older than 14 days
+- Match a managed prefix (`dev/`, `feature/`, `fix/`, `detection/`, `hotfix/`)
 
-The cleanup workflow runs weekly and can also be started manually from **Actions → Cleanup Merged Branches**.
+`main` and `dev` are never deleted by the workflow.
 
-By default, it deletes only merged branches older than 14 days and only when they match one of these prefixes:
+---
 
-```text
-dev/
-feature/
-fix/
-detection/
-hotfix/
-```
+## Operating guidelines
 
-Unmerged branches are never deleted by the workflow.
-
-## Operating notes
-
-- Keep PRs focused on one detection or one related detection set.
-- Validate locally before pushing when possible.
-- Keep detection IDs stable after creation.
-- Increment `version` when changing an existing detection.
-- Use `production` only when a detection is ready to be enabled in Splunk.
-- Use `draft` or `testing` for detections that should be deployed as disabled saved searches.
+- Keep PRs focused on one detection or one tightly related set of detections
+- Validate locally before opening a PR — catches schema errors without spending CI time
+- Increment `version` when modifying an existing detection
+- Keep detection `id` values stable — they are the stable identifier for the saved search across environments
+- Use `production` status only when the detection is ready to be enabled in Splunk
+- Use `draft` or `testing` for detections that should exist in Splunk as disabled saved searches (for review or testing)

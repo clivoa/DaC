@@ -1,6 +1,10 @@
 # Detection as Code — Splunk
 
-Manage Splunk detections as versioned YAML files with a full CI/CD pipeline powered by GitHub Actions and a self-hosted runner running in Orbstack.
+A complete Detection as Code (DaC) pipeline for managing Splunk detections as version-controlled YAML files, with automated validation and deployment through GitHub Actions.
+
+[![Validate Detection PR](https://github.com/clivoa/DaC/actions/workflows/validate-pr.yml/badge.svg)](https://github.com/clivoa/DaC/actions/workflows/validate-pr.yml)
+
+---
 
 ## How it works
 
@@ -8,10 +12,10 @@ Manage Splunk detections as versioned YAML files with a full CI/CD pipeline powe
 Analyst creates or edits a detection YAML file
               │
               ▼
-     git push → open Pull Request
+  git push → Pull Request → dev branch
               │
               ▼
-  GitHub Actions  (self-hosted runner on Orbstack)
+  GitHub Actions (self-hosted runner)
   ┌────────────────────────────────────────┐
   │  1. YAML syntax check                  │
   │  2. JSON Schema validation             │
@@ -20,67 +24,79 @@ Analyst creates or edits a detection YAML file
   └────────────────────────────────────────┘
               │
               ▼
-     Code review + approval
+  Code review + approval → merge to dev
               │
               ▼
-        Merge to main
+  PR: dev → main (production promotion)
               │
               ▼
   GitHub Actions deploy
   ┌────────────────────────────────────────┐
-  │  1. Dry-run (preview changes)          │
-  │  2. Create or update saved search      │
-  │     via Splunk REST API                │
+  │  1. Verify: came from a merged PR      │
+  │  2. Dry-run preview                    │
+  │  3. Create/update Splunk saved search  │
   └────────────────────────────────────────┘
 ```
+
+For the full architecture and design rationale, see [docs/architecture.md](docs/architecture.md).
+
+---
 
 ## Repository structure
 
 ```
 .
 ├── detections/
-│   ├── endpoint/          # Endpoint detections (Windows, Linux)
-│   ├── network/           # Network detections
-│   └── identity/          # Identity and access detections
+│   ├── endpoint/          # Endpoint detections (Windows, Linux, macOS)
+│   ├── network/           # Network-based detections
+│   ├── identity/          # Identity and access detections
+│   ├── cloud/             # Cloud provider detections
+│   └── application/       # Application-layer detections
 ├── docs/
-│   ├── splunk-setup.md    # How to run Splunk locally with Orbstack
-│   ├── runner-setup.md    # How to set up the self-hosted runner container
-│   └── github-governance.md # Branch protection and analyst workflow
+│   ├── architecture.md    # Full DaC design, pipeline, and concepts
+│   ├── github-governance.md # Branch model and protection policy
+│   ├── splunk-setup.md    # Splunk local setup with Orbstack/Docker
+│   └── runner-setup.md    # Self-hosted runner container setup
 ├── runner/
 │   ├── Dockerfile         # Ubuntu 24.04 image with GitHub Actions runner
-│   └── entrypoint.sh      # Registers runner on start, deregisters on stop
+│   └── entrypoint.sh      # Runner registration and graceful deregistration
 ├── schemas/
-│   └── detection.schema.json  # JSON Schema — validated on every PR
+│   └── detection.schema.json  # JSON Schema for detection YAML files
 ├── scripts/
 │   ├── validate.py        # Schema + SPL syntax validation
 │   ├── deploy.py          # Deploy detections via Splunk REST API
 │   └── splunk_client.py   # Splunk REST API client
-├── .github/workflows/
-│   ├── validate-pr.yml    # Required check on every PR into main
-│   ├── deploy.yml         # Triggered on every merge to main
-│   └── cleanup-branches.yml # Deletes stale merged analyst branches
-├── docker-compose.yml     # Starts the self-hosted runner container
-├── .env.example           # Environment variable template
-└── .pre-commit-config.yaml
+├── .github/
+│   ├── workflows/
+│   │   ├── validate-pr.yml       # Required check on PRs to dev and main
+│   │   ├── deploy.yml            # Deploy on merge to main
+│   │   └── cleanup-branches.yml # Weekly stale branch cleanup
+│   └── PULL_REQUEST_TEMPLATE.md
+├── docker-compose.yml     # Orchestrates the self-hosted runner container
+├── .env.example           # Environment variable reference (no real values)
+├── CONTRIBUTING.md        # How to write and submit detections
+└── SECURITY.md            # Security policy and sensitive data guidelines
 ```
+
+---
 
 ## Detection file format
 
 ```yaml
-name: "Descriptive detection name"
-id: "uuid-v4"             # generate: python3 -c "import uuid; print(uuid.uuid4())"
+name: "Detect <Threat Name>"
+id: "<uuid-v4>"           # python3 -c "import uuid; print(uuid.uuid4())"
 version: 1                # increment on every change
 status: draft             # draft | testing | production | deprecated
-author: "your-name"
-date: "2026-05-06"
-modified: "2026-05-06"
-description: "What this detects and why (min 10 characters)"
+author: "<your-team>"
+date: "YYYY-MM-DD"
+modified: "YYYY-MM-DD"
+description: "What this detects and why it matters"
 type: alert               # alert | report | scheduled_report
 
 search: |
-  index=windows EventCode=4732
-  | where Group_Name="Administrators"
-  | table _time, ComputerName, Member_Name
+  index=<index> EventCode=<code>
+  | stats count by ComputerName, User
+  | where count > 0
 
 schedule:
   cron: "*/15 * * * *"
@@ -94,51 +110,56 @@ alert:
 
 tags:
   mitre_attack:
-    - T1098               # required format: T####(.###)
+    - T1059.001           # T#### or T####.###
   platform:
     - Windows             # Windows | Linux | macOS | AWS | Azure | GCP | Network
-  category: identity      # endpoint | network | identity | cloud | application
+  category: endpoint      # endpoint | network | identity | cloud | application
 
-splunk_app: "search"      # target Splunk app (defaults to search)
+splunk_app: "search"
 ```
 
-> **Status → Splunk state mapping:**
-> `production` → enabled | all other statuses → created as disabled
+> **`status` → Splunk state:** `production` = enabled. All other values = created as disabled.
 
-## Validated fields
+---
 
-| Field | Required | Validation |
+## Infrastructure setup
+
+This pipeline requires two local components running on Orbstack. Set them up once:
+
+| Component | Guide |
+|---|---|
+| Splunk (Docker) | [docs/splunk-setup.md](docs/splunk-setup.md) |
+| GitHub Actions runner (Docker) | [docs/runner-setup.md](docs/runner-setup.md) |
+
+### Required GitHub secrets
+
+Go to **Settings → Secrets and variables → Actions**:
+
+| Type | Name | Value |
 |---|---|---|
-| `name` | Yes | min 5 characters |
-| `id` | Yes | UUID v4 format |
-| `version` | Yes | integer ≥ 1 |
-| `status` | Yes | enum |
-| `author` | Yes | string |
-| `description` | Yes | min 10 characters |
-| `type` | Yes | enum |
-| `search` | Yes | string + live SPL check via Splunk API |
-| `tags.category` | Yes | enum |
-| `tags.mitre_attack` | No | format `T####(.###)` — warning if missing |
+| Secret | `SPLUNK_URL` | `https://splunk:8089` |
+| Secret | `SPLUNK_TOKEN` | token from Splunk → Settings → Tokens |
+| Variable | `SPLUNK_APP` | `search` (or your custom app name) |
 
-## Local setup
+---
 
-### 1. Install Python dependencies and pre-commit hooks
+## Local development
+
+### Setup
 
 ```bash
+# Install Python dependencies and pre-commit hooks
 make setup
-```
 
-### 2. Set environment variables
-
-```bash
-export SPLUNK_URL="https://localhost:8089"
+# Required environment variables for local SPL validation
+export SPLUNK_URL="https://splunk:8089"   # or https://localhost:8089 if port 8089 is published
 export SPLUNK_TOKEN="<your-token>"
 ```
 
-### 3. Validate detections locally
+### Validate detections
 
 ```bash
-# Schema only (no Splunk connection needed)
+# Schema validation only (no Splunk required)
 make validate
 
 # Schema + live SPL syntax check
@@ -148,69 +169,65 @@ make validate-splunk
 python3 scripts/validate.py detections/endpoint/detect_new_local_admin.yml
 ```
 
-### 4. Deploy manually
+### Deploy manually
 
 ```bash
-make deploy-dry    # preview without changes
-make deploy        # deploy all detections
+make deploy-dry   # preview without making changes
+make deploy       # deploy all production-status detections
 ```
 
-## Infrastructure setup
-
-Before the CI/CD pipeline works, you need two things running locally:
-
-| Component | Guide |
-|---|---|
-| Splunk (Docker/Orbstack) | [docs/splunk-setup.md](docs/splunk-setup.md) |
-| GitHub Actions runner (Docker/Orbstack) | [docs/runner-setup.md](docs/runner-setup.md) |
-
-## GitHub secrets and variables
-
-Go to **Settings → Secrets and variables → Actions** and add:
-
-| Type | Name | Value |
-|---|---|---|
-| Secret | `SPLUNK_URL` | `https://host.internal:8089` |
-| Secret | `SPLUNK_TOKEN` | token from Splunk Settings → Tokens |
-| Variable | `SPLUNK_APP` | `search` (or your custom app) |
-
-> `host.internal` resolves to the macOS host from inside the Orbstack runner container.
-> Use `localhost:8089` only when running scripts directly on the Mac.
+---
 
 ## Analyst workflow
 
 ```bash
-# 1. Create a branch for the new detection
-git checkout -b dev/alice/brute-force-login
+# 1. Create a branch from dev
+git checkout dev && git pull origin dev
+git checkout -b dev/<your-name>/<detection-name>
 
 # 2. Write the detection file
-vim detections/identity/detect_brute_force_login.yml
+# (generate a fresh UUID for the id field)
+python3 -c "import uuid; print(uuid.uuid4())"
 
 # 3. Validate locally before committing
-python3 scripts/validate.py --no-splunk detections/identity/detect_brute_force_login.yml
+python3 scripts/validate.py --no-splunk detections/<category>/<file>.yml
 
-# 4. Commit and push — pre-commit hooks run automatically
-git add detections/identity/detect_brute_force_login.yml
-git commit -m "feat: add brute force login detection"
-git push origin dev/alice/brute-force-login
+# 4. Commit and push
+git add detections/<category>/<file>.yml
+git commit -m "feat: describe the detection"
+git push origin dev/<your-name>/<detection-name>
 
-# 5. Open PR → CI validates automatically
-# 6. After approval and merge → CI deploys automatically
+# 5. Open a PR into dev → CI validates automatically
+# 6. After review and merge → promote via PR: dev → main → auto-deploy
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete authoring guide and detection quality guidelines.
+
+---
+
+## Validated fields
+
+| Field | Required | Rule |
+|---|---|---|
+| `name` | Yes | min 5 characters |
+| `id` | Yes | UUID v4 format |
+| `version` | Yes | integer ≥ 1 |
+| `status` | Yes | `draft` \| `testing` \| `production` \| `deprecated` |
+| `author` | Yes | string |
+| `description` | Yes | min 10 characters |
+| `type` | Yes | `alert` \| `report` \| `scheduled_report` |
+| `search` | Yes | valid SPL (checked live via Splunk REST API) |
+| `tags.category` | Yes | enum |
+| `tags.mitre_attack` | No | `T####` or `T####.###` format — warning if absent |
+
+---
 
 ## GitHub governance
 
-`main` is the production branch. Analysts must not commit to it directly; they work in short-lived branches named `dev/<analyst>/<change>` and open a PR back to `main`.
+`main` and `dev` are protected branches. All changes must be submitted through a pull request. See [docs/github-governance.md](docs/github-governance.md) for the full policy, branch protection settings, and notes on GitHub plan requirements.
 
-Required controls:
+---
 
-| Control | Purpose |
-|---|---|
-| Protected `main` branch | Blocks direct production changes |
-| Required PR review | Adds human review before deployment |
-| Required `Validate Changed Detections` check | Blocks invalid YAML, schema, or SPL changes |
-| Automatic deploy on merge | Deploys approved detection changes to Splunk |
-| Delete branches after merge | Keeps analyst branches short-lived |
-| Weekly cleanup workflow | Removes merged branches that were not auto-deleted |
+## License
 
-See [docs/github-governance.md](docs/github-governance.md) for the full operating model.
+[MIT](LICENSE)

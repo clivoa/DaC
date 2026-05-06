@@ -53,6 +53,8 @@ docker run -d \
 | `8089` | REST API / Management — **required for DaC workflows** |
 | `9997` | Universal Forwarder receiver |
 
+> **Password rules:** minimum 8 characters, must contain at least one uppercase letter and one digit.
+
 ---
 
 ## 3. Wait for Splunk to be healthy
@@ -60,7 +62,6 @@ docker run -d \
 Splunk takes 1–2 minutes on first start.
 
 ```bash
-# Poll until healthy
 until [ "$(docker inspect --format='{{.State.Health.Status}}' splunk)" = "healthy" ]; do
   echo "Waiting for Splunk..."; sleep 5
 done
@@ -76,7 +77,7 @@ echo "Splunk is ready"
 | Web UI | http://localhost:8000 |
 | REST API | https://localhost:8089 |
 | Username | `admin` |
-| Password | `<your-password>` |
+| Password | the value you set in `SPLUNK_PASSWORD` above |
 
 > Change the password after first login: **Settings → Users → admin → Edit**.
 
@@ -90,34 +91,42 @@ The CI/CD pipeline authenticates to Splunk using a Bearer token (safer than a pa
 2. Go to **Settings → Tokens**
 3. Click **New Token**
 4. Set **User**: `admin`, **Expiration**: your preference
-5. Copy the token — you won't see it again
+5. Copy the token — you will not see it again
 
 Use this token as `SPLUNK_TOKEN` in your `.env` file and as the `SPLUNK_TOKEN` GitHub secret.
 
 ---
 
-## 6. Day-to-day management
+## 6. Connect Splunk to the DaC network
+
+The GitHub Actions runner and Splunk must be on the same Docker network so the runner can reach the Splunk REST API by container name.
 
 ```bash
-# Start
-docker start splunk
+# Run once after starting or recreating the Splunk container
+docker network connect dac_default splunk
+```
 
-# Stop
-docker stop splunk
+The runner will then reach Splunk at `https://splunk:8089`.
 
-# Tail logs
-docker logs -f splunk
+> Run this command again any time the Splunk container is recreated (e.g. after an update).
 
-# Check status
-docker ps --filter name=splunk
+---
+
+## 7. Day-to-day management
+
+```bash
+docker start splunk    # Start
+docker stop splunk     # Stop
+docker logs -f splunk  # Tail logs
+docker ps --filter name=splunk  # Check status
 ```
 
 ---
 
-## 7. Verify REST API is reachable
+## 8. Verify REST API is reachable from the runner
 
 ```bash
-curl -sk https://localhost:8089/services/server/info \
+docker exec dac-gh-runner curl -sk https://splunk:8089/services/server/info \
   -H "Authorization: Bearer <your-token>" \
   -o /dev/null -w "%{http_code}\n"
 # Expected: 200
@@ -125,7 +134,7 @@ curl -sk https://localhost:8089/services/server/info \
 
 ---
 
-## 8. Remove Splunk completely
+## 9. Remove Splunk completely
 
 ```bash
 docker rm -f splunk

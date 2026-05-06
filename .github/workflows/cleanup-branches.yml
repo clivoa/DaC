@@ -47,7 +47,8 @@ jobs:
           while IFS='|' read -r ref_name commit_time; do
             branch="${ref_name#origin/}"
 
-            if [[ "$branch" == "HEAD" || "$branch" == "main" ]]; then
+            # Never delete permanent branches
+            if [[ "$branch" == "HEAD" || "$branch" == "main" || "$branch" == "dev" ]]; then
               continue
             fi
 
