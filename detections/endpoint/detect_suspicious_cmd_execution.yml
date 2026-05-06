@@ -1,0 +1,29 @@
+name: "Detect Suspicious CMD Execution"
+id: "e6f7a8b9-c0d1-4e2f-b3c4-d5e6f7a8b9c0"
+version: 1
+status: active                # WRONG: not in enum (draft/testing/production/deprecated)
+author: "simulation"
+date: "2026-05-06"
+modified: "2026-05-06"
+                              # MISSING: required field 'description'
+type: alert
+search: |
+  index=windows EventCode=4688
+  | eval is_suspicious = if(match(NewProcessName, "(?i)cmd\.exe"),
+  | stats count by ComputerName, User, is_suspicious
+  | where count > 0
+schedule:
+  cron: "*/15 * * * *"
+  earliest: "-15m"
+  latest: "now"
+alert:
+  condition: "search count > 0"
+  severity: high
+  suppress: false
+tags:
+  mitre_attack:
+    - T1059.003
+  platform:
+    - Windows
+  category: endpoint
+splunk_app: "search"
