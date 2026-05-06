@@ -1,0 +1,78 @@
+name: Cleanup Merged Branches
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Show branches that would be deleted without deleting them"
+        required: false
+        type: boolean
+        default: true
+      minimum_age_days:
+        description: "Only delete merged branches whose latest commit is older than this many days"
+        required: false
+        default: "14"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    name: Delete stale merged branches
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete merged analyst branches
+        shell: bash
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          MINIMUM_AGE_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.minimum_age_days || '14' }}
+          BRANCH_PREFIX_REGEX: "^(dev|feature|fix|detection|hotfix)/"
+        run: |
+          set -euo pipefail
+
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+          cutoff="$(date -u -d "${MINIMUM_AGE_DAYS} days ago" +%s)"
+          selected=0
+
+          while IFS='|' read -r ref_name commit_time; do
+            branch="${ref_name#origin/}"
+
+            if [[ "$branch" == "HEAD" || "$branch" == "main" ]]; then
+              continue
+            fi
+
+            if ! [[ "$branch" =~ $BRANCH_PREFIX_REGEX ]]; then
+              echo "Skipping branch outside managed prefixes: $branch"
+              continue
+            fi
+
+            if ! git merge-base --is-ancestor "origin/$branch" "origin/main"; then
+              echo "Skipping unmerged branch: $branch"
+              continue
+            fi
+
+            if [ "$commit_time" -gt "$cutoff" ]; then
+              echo "Skipping recent merged branch: $branch"
+              continue
+            fi
+
+            selected=$((selected + 1))
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "Would delete merged branch: $branch"
+            else
+              echo "Deleting merged branch: $branch"
+              git push origin --delete "$branch"
+            fi
+          done < <(git for-each-ref --format='%(refname:short)|%(committerdate:unix)' refs/remotes/origin)
+
+          echo "Merged branches selected: $selected"

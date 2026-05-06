@@ -44,7 +44,8 @@ Analyst creates or edits a detection YAML file
 │   └── identity/          # Identity and access detections
 ├── docs/
 │   ├── splunk-setup.md    # How to run Splunk locally with Orbstack
-│   └── runner-setup.md    # How to set up the self-hosted runner container
+│   ├── runner-setup.md    # How to set up the self-hosted runner container
+│   └── github-governance.md # Branch protection and analyst workflow
 ├── runner/
 │   ├── Dockerfile         # Ubuntu 24.04 image with GitHub Actions runner
 │   └── entrypoint.sh      # Registers runner on start, deregisters on stop
@@ -55,8 +56,9 @@ Analyst creates or edits a detection YAML file
 │   ├── deploy.py          # Deploy detections via Splunk REST API
 │   └── splunk_client.py   # Splunk REST API client
 ├── .github/workflows/
-│   ├── validate-pr.yml    # Triggered on every PR touching detections/
-│   └── deploy.yml         # Triggered on every merge to main
+│   ├── validate-pr.yml    # Required check on every PR into main
+│   ├── deploy.yml         # Triggered on every merge to main
+│   └── cleanup-branches.yml # Deletes stale merged analyst branches
 ├── docker-compose.yml     # Starts the self-hosted runner container
 ├── .env.example           # Environment variable template
 └── .pre-commit-config.yaml
@@ -179,7 +181,7 @@ Go to **Settings → Secrets and variables → Actions** and add:
 
 ```bash
 # 1. Create a branch for the new detection
-git checkout -b detection/brute-force-login
+git checkout -b dev/alice/brute-force-login
 
 # 2. Write the detection file
 vim detections/identity/detect_brute_force_login.yml
@@ -190,8 +192,25 @@ python3 scripts/validate.py --no-splunk detections/identity/detect_brute_force_l
 # 4. Commit and push — pre-commit hooks run automatically
 git add detections/identity/detect_brute_force_login.yml
 git commit -m "feat: add brute force login detection"
-git push origin detection/brute-force-login
+git push origin dev/alice/brute-force-login
 
 # 5. Open PR → CI validates automatically
 # 6. After approval and merge → CI deploys automatically
 ```
+
+## GitHub governance
+
+`main` is the production branch. Analysts must not commit to it directly; they work in short-lived branches named `dev/<analyst>/<change>` and open a PR back to `main`.
+
+Required controls:
+
+| Control | Purpose |
+|---|---|
+| Protected `main` branch | Blocks direct production changes |
+| Required PR review | Adds human review before deployment |
+| Required `Validate Changed Detections` check | Blocks invalid YAML, schema, or SPL changes |
+| Automatic deploy on merge | Deploys approved detection changes to Splunk |
+| Delete branches after merge | Keeps analyst branches short-lived |
+| Weekly cleanup workflow | Removes merged branches that were not auto-deleted |
+
+See [docs/github-governance.md](docs/github-governance.md) for the full operating model.

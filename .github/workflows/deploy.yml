@@ -5,6 +5,20 @@ on:
     branches: [main]
     paths:
       - "detections/**/*.yml"
+  workflow_dispatch:
+    inputs:
+      deploy_all:
+        description: "Deploy all detection files instead of only files changed in the latest push"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: splunk-deploy-main
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -16,17 +30,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # need previous commit to diff
+          fetch-depth: 0
 
       - name: Install dependencies
         run: pip3 install --break-system-packages -r requirements.txt
 
       - name: Identify changed detection files
         id: changed
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          DEPLOY_ALL: ${{ inputs.deploy_all || false }}
         run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'detections/**/*.yml' | tr '\n' ' ')
+          if [ "$DEPLOY_ALL" = "true" ]; then
+            CHANGED=$(find detections -type f -name '*.yml' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+            DELETED=""
+          else
+            BASE="${BEFORE_SHA:-HEAD~1}"
+            if [[ "$BASE" =~ ^0+$ ]]; then
+              BASE="HEAD~1"
+            fi
+            CHANGED=$(git diff --name-only --diff-filter=ACMRT "$BASE" HEAD -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+            DELETED=$(git diff --name-only --diff-filter=D "$BASE" HEAD -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          fi
           echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "deleted=$DELETED" >> "$GITHUB_OUTPUT"
           echo "Detections to deploy: $CHANGED"
+          if [ -n "$DELETED" ]; then
+            echo "Deleted detections detected: $DELETED"
+          fi
+
+      - name: Block deleted detection files
+        if: steps.changed.outputs.deleted != ''
+        run: |
+          echo "::error::Deleted detection files cannot be deployed safely. Use status: deprecated and an explicit Splunk decommission process."
+          echo "Deleted detections: ${{ steps.changed.outputs.deleted }}"
+          exit 1
 
       - name: Dry-run deploy (preview)
         if: steps.changed.outputs.files != ''
