@@ -1,0 +1,128 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Splunk Detection",
+  "type": "object",
+  "required": ["name", "id", "version", "status", "author", "description", "type", "search", "tags"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 5,
+      "description": "Human-readable detection name"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUID v4 unique identifier"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Detection version (increment on each change)"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "testing", "production", "deprecated"],
+      "description": "Lifecycle status"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name or team"
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "Creation date (YYYY-MM-DD)"
+    },
+    "modified": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "Last modification date (YYYY-MM-DD)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "description": "What this detection looks for and why"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["alert", "report", "scheduled_report"],
+      "description": "Splunk saved search type"
+    },
+    "search": {
+      "type": "string",
+      "minLength": 5,
+      "description": "SPL query"
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cron": {
+          "type": "string",
+          "description": "Cron expression (e.g. '*/15 * * * *')"
+        },
+        "earliest": {
+          "type": "string",
+          "description": "Search time range start (e.g. '-15m')"
+        },
+        "latest": {
+          "type": "string",
+          "description": "Search time range end (e.g. 'now')"
+        }
+      }
+    },
+    "alert": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "type": "string",
+          "description": "Alert trigger condition (e.g. 'search count > 0')"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["informational", "low", "medium", "high", "critical"]
+        },
+        "suppress": {
+          "type": "boolean",
+          "description": "Suppress duplicate alerts"
+        },
+        "suppress_period": {
+          "type": "string",
+          "description": "Suppression window (e.g. '24h')"
+        }
+      }
+    },
+    "tags": {
+      "type": "object",
+      "required": ["category"],
+      "additionalProperties": false,
+      "properties": {
+        "mitre_attack": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^T\\d{4}(\\.\\d{3})?$"
+          },
+          "description": "MITRE ATT&CK technique IDs"
+        },
+        "platform": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["Windows", "Linux", "macOS", "AWS", "Azure", "GCP", "Network"]
+          }
+        },
+        "category": {
+          "type": "string",
+          "enum": ["endpoint", "network", "identity", "cloud", "application"]
+        }
+      }
+    },
+    "splunk_app": {
+      "type": "string",
+      "description": "Target Splunk app (defaults to 'search')"
+    }
+  }
+}

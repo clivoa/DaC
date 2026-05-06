@@ -1,0 +1,53 @@
+name: Validate Detection PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "detections/**/*.yml"
+
+jobs:
+  validate:
+    name: Validate Changed Detections
+    runs-on: self-hosted  # needs access to local Splunk via Orbstack
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Identify changed detection files
+        id: changed
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'detections/**/*.yml' | tr '\n' ' ')
+          echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+          if [ -z "$CHANGED" ]; then
+            echo "No detection files changed."
+          else
+            echo "Changed detections: $CHANGED"
+          fi
+
+      - name: Validate schema and SPL syntax
+        if: steps.changed.outputs.files != ''
+        env:
+          SPLUNK_URL: ${{ secrets.SPLUNK_URL }}
+          SPLUNK_TOKEN: ${{ secrets.SPLUNK_TOKEN }}
+        run: |
+          python scripts/validate.py \
+            --github-annotations \
+            ${{ steps.changed.outputs.files }}
+
+      - name: No detection files changed
+        if: steps.changed.outputs.files == ''
+        run: echo "No detection YAML files were modified — nothing to validate."

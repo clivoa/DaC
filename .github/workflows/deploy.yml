@@ -1,0 +1,59 @@
+name: Deploy Detections to Splunk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "detections/**/*.yml"
+
+jobs:
+  deploy:
+    name: Deploy to Splunk
+    runs-on: self-hosted  # needs access to local Splunk via Orbstack
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # need previous commit to diff
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Identify changed detection files
+        id: changed
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'detections/**/*.yml' | tr '\n' ' ')
+          echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "Detections to deploy: $CHANGED"
+
+      - name: Dry-run deploy (preview)
+        if: steps.changed.outputs.files != ''
+        env:
+          SPLUNK_URL: ${{ secrets.SPLUNK_URL }}
+          SPLUNK_TOKEN: ${{ secrets.SPLUNK_TOKEN }}
+          SPLUNK_APP: ${{ vars.SPLUNK_APP || 'search' }}
+        run: |
+          python scripts/deploy.py \
+            --dry-run \
+            ${{ steps.changed.outputs.files }}
+
+      - name: Deploy detections
+        if: steps.changed.outputs.files != ''
+        env:
+          SPLUNK_URL: ${{ secrets.SPLUNK_URL }}
+          SPLUNK_TOKEN: ${{ secrets.SPLUNK_TOKEN }}
+          SPLUNK_APP: ${{ vars.SPLUNK_APP || 'search' }}
+        run: |
+          python scripts/deploy.py \
+            ${{ steps.changed.outputs.files }}
+
+      - name: No detections changed
+        if: steps.changed.outputs.files == ''
+        run: echo "No detection YAML files were modified — nothing to deploy."
