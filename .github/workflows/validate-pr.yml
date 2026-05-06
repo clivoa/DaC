@@ -3,8 +3,10 @@ name: Validate Detection PR
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "detections/**/*.yml"
+
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   validate:
@@ -23,15 +25,28 @@ jobs:
 
       - name: Identify changed detection files
         id: changed
+        shell: bash
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'detections/**/*.yml' | tr '\n' ' ')
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          CHANGED=$(git diff --name-only --diff-filter=ACMRT "origin/${{ github.base_ref }}...HEAD" -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          DELETED=$(git diff --name-only --diff-filter=D "origin/${{ github.base_ref }}...HEAD" -- 'detections/**/*.yml' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
           echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "deleted=$DELETED" >> "$GITHUB_OUTPUT"
+          if [ -n "$DELETED" ]; then
+            echo "Deleted detections: $DELETED"
+          fi
           if [ -z "$CHANGED" ]; then
             echo "No detection files changed."
           else
             echo "Changed detections: $CHANGED"
           fi
+
+      - name: Block deleted detection files
+        if: steps.changed.outputs.deleted != ''
+        run: |
+          echo "::error::Detection files must not be deleted from the repository. Set status: deprecated instead, then handle Splunk removal through an explicit decommission process."
+          echo "Deleted detections: ${{ steps.changed.outputs.deleted }}"
+          exit 1
 
       - name: Validate schema and SPL syntax
         if: steps.changed.outputs.files != ''
