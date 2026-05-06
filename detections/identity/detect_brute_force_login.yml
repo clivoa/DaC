@@ -1,0 +1,34 @@
+name: "Detect Brute Force Login Attempts"
+id: "d5e6f7a8-b9c0-4d1e-af2b-3c4d5e6f7a8b"
+version: 1
+status: testing
+author: "simulation"
+date: "2026-05-06"
+modified: "2026-05-06"
+description: "Detects brute force login attempts by identifying accounts with a high number of failed authentication events within a short window"
+type: alert
+search: |
+  index=windows EventCode=4625
+  | bucket _time span=5m
+  | stats count as failed_attempts values(Source_Network_Address) as src_ips
+      by _time, Account_Name
+  | where failed_attempts >= 10
+  | eval risk=case(failed_attempts >= 50, "critical", failed_attempts >= 20, "high", true(), "medium")
+  | sort -failed_attempts
+schedule:
+  cron: "*/10 * * * *"
+  earliest: "-10m"
+  latest: "now"
+alert:
+  condition: "search count > 0"
+  severity: high
+  suppress: true
+  suppress_period: "1h"
+tags:
+  mitre_attack:
+    - T1110.001
+    - T1110.003
+  platform:
+    - Windows
+  category: identity
+splunk_app: "search"
