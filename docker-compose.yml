@@ -19,7 +19,10 @@ services:
       RUNNER_NAME: ${RUNNER_NAME:-dac-runner}
       RUNNER_LABELS: ${RUNNER_LABELS:-self-hosted,linux,dac}
       # Splunk connection — used by validate.py and deploy.py inside workflows
-      SPLUNK_URL: ${SPLUNK_URL:-https://host.internal:8089}
+      # Reaches Splunk by container name (both on dac_default network)
+      # For the runner to reach Splunk, connect the splunk container to this network:
+      #   docker network connect dac_default splunk
+      SPLUNK_URL: ${SPLUNK_URL:-https://splunk:8089}
       SPLUNK_TOKEN: ${SPLUNK_TOKEN:-}
       SPLUNK_USERNAME: ${SPLUNK_USERNAME:-}
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-}
