@@ -1,0 +1,37 @@
+name: "Detect Suspicious Scheduled Task Creation"
+id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+version: 1
+status: testing
+author: "security-team"
+date: "2026-05-11"
+modified: "2026-05-11"
+description: "Detects scheduled task creation via schtasks.exe, a common persistence and lateral movement technique used by attackers to maintain access or execute payloads"
+type: alert
+search: |
+  index=windows (EventCode=4698 OR EventCode=4702)
+  | eval task_name=mvindex('Task Name', 0)
+  | eval task_content=mvindex('Task Content', 0)
+  | rex field=task_content "(?i)<Command>(?P<command>[^<]+)</Command>"
+  | eval suspicious=if(
+      match(command, "(?i)(powershell|cmd|wscript|cscript|mshta|regsvr32|rundll32|certutil)"),
+      1, 0)
+  | where suspicious=1
+  | stats count values(task_name) as task_names values(command) as commands
+      by _time, ComputerName, SubjectUserName
+  | sort -count
+schedule:
+  cron: "*/15 * * * *"
+  earliest: "-15m"
+  latest: "now"
+alert:
+  condition: "search count > 0"
+  severity: high
+  suppress: true
+  suppress_period: "1h"
+tags:
+  mitre_attack:
+    - T1053.005
+  platform:
+    - Windows
+  category: endpoint
+splunk_app: "search"
