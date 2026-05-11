@@ -46,7 +46,7 @@ Use this template:
 name: "Detect <Threat Name>"
 id: "<uuid-v4>"
 version: 1
-status: draft        # start as draft; set to testing/production when ready
+status: draft        # lifecycle hint: draft | testing | production | deprecated
 author: "<your-team>"
 date: "<YYYY-MM-DD>"
 modified: "<YYYY-MM-DD>"
@@ -118,7 +118,7 @@ A reviewer will check the detection logic, thresholds, and MITRE mapping. Update
 
 After your PR is merged into `dev`, a senior analyst or platform engineer will open a PR from `dev` to `main`. On merge to `main`, the detection is deployed to Splunk automatically.
 
-Change `status` from `draft`/`testing` to `production` when the detection is validated and ready to be enabled in Splunk.
+The production deploy workflow sets `DEPLOY_STATUS=production`, so you do not need a second content-only change just to flip `status: testing` to `status: production`. Update the YAML `status` only when the detection lifecycle metadata itself should change, or when marking a detection as `deprecated`. Detections still marked `draft` remain disabled.
 
 ---
 
@@ -139,13 +139,13 @@ Change `status` from `draft`/`testing` to `production` when the detection is val
 - Always filter by `index` and, where possible, `sourcetype` or `source` — avoid unbounded searches
 - Use `stats` or `tstats` rather than raw search when aggregating large volumes
 - Avoid `| head` or `| tail` in production detections — use `| where count > <threshold>` instead
-- Test thresholds against real data before setting `status: production`
+- Test thresholds against real data before production deployment
 
 ### Metadata
 
 - `description` should explain *what* the detection looks for and *why* it matters — not just repeat the name
 - MITRE ATT&CK tags should reflect the actual technique, not just the tactic
-- Use `status: testing` for detections deployed as disabled — they can be enabled in Splunk for tuning without being "production"
+- Use `status: testing` as lifecycle metadata for detections that are still being tuned. The deployment workflow can still override the effective Splunk state through `DEPLOY_STATUS`.
 
 ### IDs
 
