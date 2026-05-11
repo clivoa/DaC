@@ -12,6 +12,16 @@ on:
         required: false
         type: boolean
         default: false
+      deploy_status:
+        description: "Deployment status override used to enable or disable saved searches"
+        required: false
+        type: choice
+        default: production
+        options:
+          - draft
+          - testing
+          - production
+          - deprecated
 
 permissions:
   contents: read
@@ -26,6 +36,8 @@ jobs:
     name: Deploy to Splunk
     # Runs on the self-hosted Ubuntu runner (Orbstack) — needs local Splunk access
     runs-on: [self-hosted, linux, dac]
+    env:
+      DEPLOY_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_status || 'production' }}
 
     steps:
       - name: Checkout
@@ -52,6 +64,9 @@ jobs:
 
       - name: Install dependencies
         run: pip3 install --break-system-packages -r requirements.txt
+
+      - name: Show deployment status
+        run: echo "DEPLOY_STATUS=${DEPLOY_STATUS}"
 
       - name: Identify changed detection files
         id: changed

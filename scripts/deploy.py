@@ -5,9 +5,10 @@ import os
 import yaml
 import argparse
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 REPO_ROOT = Path(__file__).parent.parent
+DEPLOY_STATUSES = ("draft", "testing", "production", "deprecated")
 
 SEVERITY_MAP = {
     "informational": 1,
@@ -18,11 +19,27 @@ SEVERITY_MAP = {
 }
 
 
-def to_splunk_params(detection: dict) -> Dict[str, Any]:
+def effective_deploy_status(detection: dict, deploy_status: Optional[str] = None) -> str:
+    """Return the deployment status, falling back to the detection lifecycle status."""
+    status = deploy_status or detection.get("status", "testing")
+    if status not in DEPLOY_STATUSES:
+        expected = ", ".join(DEPLOY_STATUSES)
+        raise ValueError(f"Invalid deploy status '{status}'. Expected one of: {expected}")
+    return status
+
+
+def should_disable_saved_search(detection: dict, deploy_status: Optional[str] = None) -> bool:
+    """Decide whether the Splunk saved search should be disabled."""
+    if detection.get("status") in ("draft", "deprecated"):
+        return True
+    return effective_deploy_status(detection, deploy_status) != "production"
+
+
+def to_splunk_params(detection: dict, deploy_status: Optional[str] = None) -> Dict[str, Any]:
     """Map detection YAML fields to Splunk saved search POST parameters."""
     params: Dict[str, Any] = {
         "description": detection.get("description", ""),
-        "disabled": "0" if detection.get("status") == "production" else "1",
+        "disabled": "1" if should_disable_saved_search(detection, deploy_status) else "0",
         "is_scheduled": "0",
     }
 
@@ -42,28 +59,62 @@ def to_splunk_params(detection: dict) -> Dict[str, Any]:
     return params
 
 
-def deploy_file(file_path: str, client, app: str, dry_run: bool) -> dict:
+def deploy_file(
+    file_path: str,
+    client,
+    app: str,
+    dry_run: bool,
+    deploy_status: Optional[str] = None,
+) -> dict:
     with open(file_path) as f:
         detection = yaml.safe_load(f)
 
     name = detection["name"]
     search = detection["search"].strip()
-    params = to_splunk_params(detection)
+    params = to_splunk_params(detection, deploy_status)
+    lifecycle_status = detection.get("status", "unknown")
+    resolved_status = effective_deploy_status(detection, deploy_status)
+    splunk_state = "enabled" if params["disabled"] == "0" else "disabled"
 
     existing = client.get_saved_search(name, app=app)
     action = "create" if existing is None else "update"
 
     if dry_run:
-        return {"file": file_path, "name": name, "action": f"would-{action}", "ok": True}
+        return {
+            "file": file_path,
+            "name": name,
+            "action": f"would-{action}",
+            "ok": True,
+            "lifecycle_status": lifecycle_status,
+            "deploy_status": resolved_status,
+            "splunk_state": splunk_state,
+        }
 
     try:
         if action == "create":
             client.create_saved_search(name, search, params, app=app)
         else:
             client.update_saved_search(name, search, params, app=app)
-        return {"file": file_path, "name": name, "action": action, "ok": True}
+        return {
+            "file": file_path,
+            "name": name,
+            "action": action,
+            "ok": True,
+            "lifecycle_status": lifecycle_status,
+            "deploy_status": resolved_status,
+            "splunk_state": splunk_state,
+        }
     except Exception as e:
-        return {"file": file_path, "name": name, "action": action, "ok": False, "error": str(e)}
+        return {
+            "file": file_path,
+            "name": name,
+            "action": action,
+            "ok": False,
+            "error": str(e),
+            "lifecycle_status": lifecycle_status,
+            "deploy_status": resolved_status,
+            "splunk_state": splunk_state,
+        }
 
 
 def print_summary(results: List[dict], dry_run: bool) -> bool:
@@ -71,7 +122,11 @@ def print_summary(results: List[dict], dry_run: bool) -> bool:
     for r in results:
         icon = "✓" if r["ok"] else "✗"
         dry = " (dry-run)" if dry_run else ""
-        print(f"{icon} [{r['action']}{dry}] {r['name']}")
+        state = (
+            f" [{r['splunk_state']}, lifecycle_status={r['lifecycle_status']}, "
+            f"deploy_status={r['deploy_status']}]"
+        )
+        print(f"{icon} [{r['action']}{dry}] {r['name']}{state}")
         if not r["ok"]:
             print(f"  ERROR: {r.get('error', 'unknown')}")
             all_ok = False
@@ -87,7 +142,17 @@ def main():
     parser.add_argument("--splunk-username", default=os.getenv("SPLUNK_USERNAME"))
     parser.add_argument("--splunk-password", default=os.getenv("SPLUNK_PASSWORD"))
     parser.add_argument("--app", default=os.getenv("SPLUNK_APP", "search"))
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be deployed without making changes")
+    parser.add_argument(
+        "--deploy-status",
+        default=os.getenv("DEPLOY_STATUS"),
+        choices=DEPLOY_STATUSES,
+        help="Override YAML lifecycle status when deciding whether saved searches are enabled",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deployed without making changes",
+    )
     args = parser.parse_args()
 
     if not args.splunk_url:
@@ -117,10 +182,17 @@ def main():
         sys.exit(0)
 
     print(f"Deploying {len(files)} detection(s) to {args.splunk_url} (app={args.app})")
+    if args.deploy_status:
+        print(f"Deployment status override: {args.deploy_status}")
+    else:
+        print("Deployment status override: not set (using each detection's YAML status)")
     if args.dry_run:
         print("--- DRY RUN ---")
 
-    results = [deploy_file(f, client, args.app, args.dry_run) for f in files]
+    results = [
+        deploy_file(f, client, args.app, args.dry_run, args.deploy_status)
+        for f in files
+    ]
     ok = print_summary(results, args.dry_run)
 
     deployed = sum(1 for r in results if r["ok"])

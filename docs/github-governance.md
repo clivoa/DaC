@@ -130,5 +130,7 @@ The cleanup workflow only removes branches that:
 - Validate locally before opening a PR — catches schema errors without spending CI time
 - Increment `version` when modifying an existing detection
 - Keep detection `id` values stable — they are the stable identifier for the saved search across environments
-- Use `production` status only when the detection is ready to be enabled in Splunk
-- Use `draft` or `testing` for detections that should exist in Splunk as disabled saved searches (for review or testing)
+- Treat YAML `status` as lifecycle metadata, not the only source of deployment state
+- Let the deploy workflow set the effective Splunk state with `DEPLOY_STATUS`; merges to `main` deploy with `DEPLOY_STATUS=production`
+- Use `status: draft` for detections that are not ready to be enabled
+- Use `status: deprecated` to retire detections; draft and deprecated detections are always deployed disabled

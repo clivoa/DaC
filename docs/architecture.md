@@ -153,6 +153,10 @@ Verify: was this push from a merged PR?
         │ (guards against accidental direct pushes)
         │
         ▼
+Set deployment status override
+        │ (DEPLOY_STATUS=production on main)
+        │
+        ▼
 Identify changed detection files (vs previous commit)
         │
         ├── workflow_dispatch with deploy_all=true → deploy all files
@@ -166,12 +170,20 @@ Deploy: POST to Splunk REST API
   └── saved search missing? → create
 ```
 
-Detection `status` controls whether the saved search is enabled in Splunk:
+The effective deployment status controls whether the saved search is enabled in Splunk:
 
-| Detection `status` | Splunk saved search |
+| Effective deployment status | Splunk saved search |
 |---|---|
 | `production` | created/updated **enabled** |
 | `draft`, `testing`, `deprecated` | created/updated **disabled** |
+
+The deploy script resolves that status in this order:
+
+1. `--deploy-status` CLI argument
+2. `DEPLOY_STATUS` environment variable
+3. Detection YAML `status` field as a fallback
+
+This keeps local/manual deployment backward compatible, while allowing GitHub Actions to promote the same reviewed detection without requiring a second YAML-only change from `testing` to `production`. Detections marked `status: draft` or `status: deprecated` are always deployed disabled, even if the deployment override is `production`.
 
 ### `cleanup-branches.yml` — Branch housekeeping
 

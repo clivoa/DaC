@@ -8,13 +8,13 @@
 |---|---|
 | File(s) | `detections/.../` |
 | MITRE ATT&CK | T |
-| Status | draft / testing / production |
+| Lifecycle status | draft / testing / production / deprecated |
 
 ## Changes
 
 - [ ] New detection
 - [ ] Updated existing detection (increment `version` and update `modified` date)
-- [ ] Status change only
+- [ ] Lifecycle status change only
 
 ## Validation
 

@@ -86,7 +86,7 @@ For the full architecture and design rationale, see [docs/architecture.md](docs/
 name: "Detect <Threat Name>"
 id: "<uuid-v4>"           # python3 -c "import uuid; print(uuid.uuid4())"
 version: 1                # increment on every change
-status: draft             # draft | testing | production | deprecated
+status: draft             # lifecycle hint: draft | testing | production | deprecated
 author: "<your-team>"
 date: "YYYY-MM-DD"
 modified: "YYYY-MM-DD"
@@ -118,7 +118,7 @@ tags:
 splunk_app: "search"
 ```
 
-> **`status` → Splunk state:** `production` = enabled. All other values = created as disabled.
+> **Deployment state:** `DEPLOY_STATUS` / `--deploy-status` controls whether the Splunk saved search is enabled. If no override is set, deployment falls back to the YAML `status`, preserving the original behavior. Detections marked `draft` or `deprecated` are always deployed as disabled.
 
 ---
 
@@ -173,7 +173,11 @@ python3 scripts/validate.py detections/endpoint/detect_new_local_admin.yml
 
 ```bash
 make deploy-dry   # preview without making changes
-make deploy       # deploy all production-status detections
+make deploy       # deploy all detections using each YAML status
+
+# Override the deployment state without editing detection YAML
+DEPLOY_STATUS=production make deploy
+python3 scripts/deploy.py --all --deploy-status testing
 ```
 
 ---
@@ -198,7 +202,7 @@ git commit -m "feat: describe the detection"
 git push origin dev/<your-name>/<detection-name>
 
 # 5. Open a PR into dev → CI validates automatically
-# 6. After review and merge → promote via PR: dev → main → auto-deploy
+# 6. After review and merge → promote via PR: dev → main → auto-deploy with DEPLOY_STATUS=production
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete authoring guide and detection quality guidelines.
